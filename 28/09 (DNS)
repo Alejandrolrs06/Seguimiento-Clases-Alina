@@ -1,0 +1,209 @@
+
+Datos de la Práctica	Análisis y Resolución del Sistema DNS
+Módulo	0375 Servicios de red
+Ciclo Formativo	ASIX
+Alumno	
+Formato de Entrega	URL al informe documentado en Gitbook personal
+
+Objetivos
+Instalar y configurar servidores de DNS
+   
+Instala – configura - verifica [5p]
+1.	Instalar y configurar un servidor DNS. 
+
+En una VM con Debian, instala y configura el servicio de DNS. Para ello, puedes seguir la guía que está en punkymo.
+
+
+Preguntas
+1.	¿Qué función cumple el servicio DNS en la red y por qué es esencial para el funcionamiento de Internet
+
+El DNS traduce nombres de dominio legibles (www.google.com) a direcciones IP (142.250.184.100) que las máquinas entienden. Es esencial porque toda conexión a Internet empieza con una consulta DNS (web, correo, APIs...) y porque evita tener que memorizar IPs. Es distribuido y jerárquico: millones de servidores coordinados, no uno solo.
+
+2.	¿Cómo se estructura la jerarquía del DNS y qué rol cumple cada nivel?
+
+	Árbol invertido con varios niveles:
+Raíz (.) → 13 servidores mundiales, saben quién gestiona cada TLD.
+TLD (.com, .es) → gestionan los dominios bajo su extensión.
+Dominio de segundo nivel (google.com) → zona autoritativa de una organización.
+Subdominios (www.google.com) → registros concretos.
+ 
+
+
+3.	¿Cuál es la diferencia entre un servidor DNS iterativo y un servidor recursivo?
+
+Recursivo:
+
+Qué hace: Todo el trabajo hasta la respuesta final
+
+Quién lo usa: Clientes finales
+
+Ejemplo: 8.8.8.8, 1.1.1.1
+
+Caché: Sí
+
+
+Iterativo:
+
+Qué hace: Responde lo que sabe o da una referencia
+
+Quién lo usa: Otros servidores DNS
+
+Ejemplo: Raíz, TLD, autoritativos
+
+Caché: No
+
+En la práctica BIND actúa como autoritativo para ub-server.local y como recursivo para consultas externas.
+
+ 
+
+4.	¿Qué son los registros de recursos (RR) en DNS y cuáles son los más importantes?Haz una lista.
+
+
+Entradas individuales de una zona DNS. Los más importantes:
+Tipo	Función
+A	Nombre → IPv4
+AAAA	Nombre → IPv6
+CNAME	Alias de un nombre a otro
+MX	Servidor de correo
+NS	Servidores autoritativos
+PTR	IP → nombre (inversa)
+SOA	Info administrativa de la zona
+TXT	Texto libre (SPF, DKIM, verificaciones)
+En la práctica usamos: SOA, NS, A, PTR.
+
+
+
+	
+ 
+
+5.	¿Qué vulnerabilidades existen en el servicio DNS  y qué mecanismos de seguridad pueden mitigarlas?
+
+Vulnerabilidad	Mitigación
+Cache poisoning / spoofing	DNSSEC, puertos y TXID aleatorios
+DNS amplification (DDoS)	Restringir recursión abierta
+Espionaje de consultas	DoT, DoH, DoQ (cifrado)
+Transferencias de zona no autorizadas	allow-transfer { none; }
+Registros mal configurados	SPF, DKIM, DMARC
+Updates dinámicos sin autenticar	TSIG, SIG(0)
+En la práctica aplicamos allow-query restringido, allow-transfer none y dnssec-validation auto.
+
+
+Reporte técnico [2p] 
+Escribe un informe técnico y un manual de usuarios en github. 
+
+El informe debe contener:
+ 
+
+●	Introducción - Un breve resumen a partir de las preguntas que te dejo más abajo
+
+El DNS traduce nombres de dominio (www.google.com) a direcciones IP. Es esencial porque toda conexión a Internet empieza con una consulta DNS. Se organiza en jerarquía: raíz → TLD → dominio → subdominios, y cada nivel delega en el siguiente.
+Un servidor recursivo hace todo el trabajo hasta la respuesta final (8.8.8.8); uno iterativo responde lo que sabe o da una referencia (raíz, TLD, autoritativos).
+Los registros RR más importantes: A (IPv4), AAAA (IPv6), CNAME (alias), MX (correo), NS (servidores), PTR (inversa), SOA (admin), TXT (texto).
+Vulnerabilidades: cache poisoning, amplificación DDoS, espionaje, transferencias no autorizadas. Mitigaciones: DNSSEC, restringir recursión, DoT/DoH, allow-transfer none.
+
+
+●	Características de hardware y del sistema operativo utilizados para trabajar el DNS
+
+VM Ubuntu Server 24.04 sobre VirtualBox (4 GB RAM, 4 vCPU, 20 GB disco). Host Windows con adaptador Host-Only NAT para la comunicación.
+ 
+
+●	Desarrollo
+
+Configuración de BIND9: 
+
+
+foto1
+
+Verificación DNS:
+
+ foto2
+Red configurada:
+ foto3
+
+
+Cliente Windows:
+
+ foto4
+
+
+
+●	Análisis de incidencias técnicas
+
+1.	Config pegada en bash → resuelto usando sudo tee.
+2.	Subredes distintas (Windows 192.168.56.1 vs Ubuntu 192.168.6.100) → resuelto cambiando Host-Only de Windows a 192.168.6.1/24.
+3.	Acceso denegado en PowerShell → resuelto abriendo como Administrador.
+
+●	Conclusiones
+
+IND9 funciona correctamente con resolución directa e inversa, verificado desde Ubuntu y Windows. La mayor dificultad fue alinear las subredes del adaptador Host-Only. La práctica ha permitido comprender el funcionamiento del DNS, las zonas y la configuración de BIND9.
+ 
+
+El manual de usuario debe contener:
+●	Los aspectos más importantes de la configuración del servicio de DNS.
+foto5
+ 
+BIND9:
+
+Ficheros clave
+•	named.conf.options → opciones globales
+•	named.conf.local → declaración de zonas
+•	db.<dominio> → zona directa
+•	db.<red-inversa> → zona inversa
+
+Abrir la zona directa
+
+Usamos este comando para acceder a la zona directa y añadimos un nuevo registro:
+ nuevo   IN  A  192.168.6.100
+foto6
+
+Y añadimo un incrementar al serial del SOA:
+2024092802 ; Serial
+
+ 
+Reiniciar BIND con el : sudo systemctl restart bind9
+
+ Probar el nuevo registro: 
+
+ foto7
+
+Links
+
+1.	Instalar Bind9: https://www.isc.org/bind/
+2.	Configurar las IP con NetPlan: https://netplan.io
+3.	https://punkymo.gitbook.io
+
+
+
+
+
+
+
+
+
+
+
+Bibliografía:
+
+ZeppelinuX — Instalación y configuración de BIND9 en Debian:
+https://www.zeppelinux.es/instalacion-y-configuracion-de-bind9-en-debian/
+
+ISC — BIND 9 Documentation (Administrator Reference Manual):
+https://kb.isc.org/docs/aa-01031
+
+ICANN — Acerca de los nombres de dominio:
+https://www.icann.org/resources/pages/about-domain-names-2018-09-12-es
+
+
+3 preguntas hechas a la IA mientra hacia el informe:	
+
+1.	¿Por qué BIND puede estar activo en Ubuntu pero Windows no recibe respuesta DNS?
+
+Porque el timeout indica un problema de red, no de DNS. Los paquetes no llegan al servidor. Se diagnostica comprobando primero ping, luego que ambos adaptadores Host-Only estén en la misma subred, y finalmente que BIND escuche en la interfaz correcta con ss -ulnp | grep :53.
+
+2.	¿Por qué hay que incrementar el serial del SOA al modificar una zona?
+
+Porque el serial actúa como número de versión. Si no se incrementa, los servidores secundarios no detectan el cambio y no propagan la actualización, provocando inconsistencias en la resolución.
+
+3.	¿Cuál es la diferencia entre un servidor DNS recursivo y uno iterativo?
+
+El recursivo hace todas las consultas necesarias hasta obtener la respuesta final (ej. 8.8.8.8). El iterativo responde con lo que sabe o da una referencia a otro servidor más adecuado (raíz, TLD, autoritativos).
