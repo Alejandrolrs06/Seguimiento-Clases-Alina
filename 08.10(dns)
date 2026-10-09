@@ -1,76 +1,81 @@
-from pathlib import Path
-import pypandoc
+# Configuración de DNS primario y secundario con BIND9 en Debian
 
-src = Path("/mnt/data/Markdown pegado.md")
-text = src.read_text(encoding="utf-8")
+## Introducción
 
-reworked = r"""# Despliegue de DNS primario y secundario en Debian mediante BIND9
+Esta práctica consiste en desplegar dos servidores DNS utilizando BIND9 sobre Debian. El servidor primario administra los registros de las zonas y el secundario obtiene una copia de estos mediante transferencias DNS.
 
-## Descripción de la práctica
+Se configurarán las zonas de resolución directa e inversa y se realizarán pruebas para comprobar que la información se replica correctamente entre ambos servidores.
 
-En este ejercicio se prepara una infraestructura DNS redundante con dos equipos Debian y BIND9. El primero actúa como servidor primario y mantiene las zonas DNS; el segundo funciona como servidor secundario y recibe las copias mediante transferencias de zona. Se configuran tanto la resolución directa como la inversa y se comprueba la sincronización entre ambos nodos.
+## Índice
 
-## Contenido
-
-1. Finalidad
-2. Topología y parámetros
-3. Preparación de los equipos
-4. Puesta en marcha del DNS primario
-5. Alta del DNS secundario
-6. Pruebas de funcionamiento
-7. Incidencias durante la configuración
-8. Herramientas de comprobación
-9. Fuentes consultadas
+1. [Objetivos](#1-objetivos)
+2. [Diseño de la red](#2-diseño-de-la-red)
+3. [Instalación y requisitos previos](#3-instalación-y-requisitos-previos)
+4. [Configuración del servidor primario](#4-configuración-del-servidor-primario)
+5. [Configuración del servidor secundario](#5-configuración-del-servidor-secundario)
+6. [Verificación y resultados](#6-verificación-y-resultados)
+7. [Problemas encontrados y soluciones](#7-problemas-encontrados-y-soluciones)
+8. [Comandos útiles](#8-comandos-útiles)
+9. [Referencias](#9-referencias)
+10. [Conclusión](#10-conclusión)
 
 ---
 
-## 1. Finalidad
+## 1. Objetivos
 
-Los objetivos de la práctica son:
+Los objetivos principales del laboratorio son:
 
-- Crear una zona DNS directa y otra inversa en el servidor primario.
-- Configurar un segundo servidor para obtener ambas zonas por transferencia AXFR.
-- Confirmar que las respuestas DNS coinciden y que las modificaciones se distribuyen cuando se actualiza el número de serie (*serial*).
+- Crear una zona directa y otra inversa en el servidor DNS primario.
+- Configurar un servidor secundario que reciba ambas zonas mediante transferencias AXFR.
+- Comprobar que los dos servidores ofrecen respuestas equivalentes.
+- Verificar que los cambios se propagan al actualizar el número de serie (*serial*) de las zonas.
 
-## 2. Topología y parámetros de red
+## 2. Diseño de la red
 
-| Elemento | DNS primario | DNS secundario |
+El entorno está compuesto por dos equipos Debian conectados mediante una red interna.
+
+| Parámetro | Servidor primario | Servidor secundario |
 |---|---|---|
-| Nombre del equipo | `felipe` | `dns2.felipe.org` |
-| Dirección de la red interna | `192.168.6.100/24` | `192.168.6.101/24` |
+| Hostname | `alejandro` | `dns2.alejandro.org` |
+| Dirección IP | `192.168.6.100/24` | `192.168.6.101/24` |
 | Interfaz interna | `enp0s8` | `enp0s8` |
 | Función | Maestro | Esclavo |
 
-Parámetros compartidos:
+### Parámetros del entorno
 
-- Zona directa: `haven.local`
-- Zona inversa: `6.168.192.in-addr.arpa`
-- Subred del laboratorio: `192.168.6.0/24`
-- Servidores de reenvío: `1.1.1.1` y `9.9.9.9`
-- Sistema base: Debian con BIND9
+- **Zona directa:** `haven.local`
+- **Zona inversa:** `6.168.192.in-addr.arpa`
+- **Red interna:** `192.168.6.0/24`
+- **Servidores DNS externos:** `1.1.1.1` y `9.9.9.9`
+- **Sistema operativo:** Debian
+- **Servicio DNS:** BIND9
 
-Los dos equipos cuentan además con una interfaz `enp0s3`, configurada en NAT con la dirección `10.0.2.15/24` para disponer de acceso a Internet.
+Ambos equipos disponen de una segunda interfaz, `enp0s3`, conectada mediante NAT con la dirección `10.0.2.15/24` para acceder a Internet.
 
-## 3. Preparación de los equipos
+---
 
-Antes de configurar las zonas, hay que disponer de dos máquinas Debian conectadas a la misma red interna, con direcciones IP diferentes y permisos de administración mediante `sudo`.
+## 3. Instalación y requisitos previos
 
-Instala BIND9 y las utilidades necesarias en ambos sistemas:
+Antes de empezar, es necesario disponer de dos máquinas Debian conectadas a la misma red interna, con direcciones IP diferentes y permisos de administración.
+
+Instala BIND9 y sus herramientas auxiliares en ambos equipos:
 
 ```bash
 sudo apt update
 sudo apt install bind9 bind9utils dnsutils -y
 ```
 
-En el escenario de esta práctica, `ufw` se encuentra desactivado. Si se habilita el cortafuegos, se debe permitir el tráfico DNS por los puertos 53 TCP y UDP entre los dos servidores.
+En este laboratorio, el cortafuegos `ufw` está desactivado. Si estuviera habilitado, habría que permitir el tráfico DNS por los puertos 53 TCP y UDP entre ambos servidores.
 
 ---
 
-## 4. Puesta en marcha del DNS primario
+## 4. Configuración del servidor primario
 
-### 4.1 Ajustes generales del servicio
+El servidor primario utiliza la dirección `192.168.6.100` y se encarga de mantener los registros originales de las zonas DNS.
 
-Edita `/etc/bind/named.conf.options` y establece las opciones siguientes:
+### 4.1. Opciones generales
+
+Edita el archivo `/etc/bind/named.conf.options`:
 
 ```conf
 acl "safeclients" {
@@ -87,7 +92,7 @@ options {
 
     listen-on { 192.168.6.100; };
 
-    // La transferencia solo se autoriza al DNS secundario
+    // Autorizar transferencias únicamente al secundario
     allow-transfer { 192.168.6.101; };
 
     allow-query { safeclients; };
@@ -100,31 +105,37 @@ options {
 };
 ```
 
-La regla `allow-transfer` limita las transferencias de zona al servidor secundario identificado por `192.168.6.101`.
+La directiva `allow-transfer` permite que el servidor `192.168.6.101` solicite las transferencias de las zonas.
 
-### 4.2 Registro de las zonas
+### 4.2. Declaración de las zonas
 
-En `/etc/bind/named.conf.local`, declara las dos zonas que administrará el primario:
+Abre `/etc/bind/named.conf.local` y añade las siguientes configuraciones:
 
 ```conf
-// Zona de resolución directa
+// Zona directa
 zone "haven.local" {
     type master;
     file "/etc/bind/zones/db.haven.local";
 };
 
-// Zona de resolución inversa
+// Zona inversa
 zone "6.168.192.in-addr.arpa" {
     type master;
     file "/etc/bind/zones/db.6.168.192";
 };
 ```
 
-Comprueba que el directorio `/etc/bind/zones/` existe antes de crear los ficheros de zona.
+Crea el directorio donde se guardarán los archivos de zona y asigna permisos adecuados:
 
-### 4.3 Fichero de resolución directa
+```bash
+sudo mkdir -p /etc/bind/zones
+sudo chown -R root:bind /etc/bind/zones
+sudo chmod 775 /etc/bind/zones
+```
 
-Crea o edita `/etc/bind/zones/db.haven.local` con este contenido:
+### 4.3. Configuración de la zona directa
+
+Crea el archivo `/etc/bind/zones/db.haven.local`:
 
 ```dns
 $TTL 604800
@@ -145,9 +156,11 @@ ns      IN  A   192.168.6.100
 ns2     IN  A   192.168.6.101
 ```
 
-### 4.4 Fichero de resolución inversa
+Esta zona permite relacionar los nombres de los servidores DNS con sus respectivas direcciones IP.
 
-Configura `/etc/bind/zones/db.6.168.192` de esta manera:
+### 4.4. Configuración de la zona inversa
+
+Crea el archivo `/etc/bind/zones/db.6.168.192`:
 
 ```dns
 $TTL 604800
@@ -159,18 +172,20 @@ $TTL 604800
         2h      ; Negative TTL
 )
 
-; Servidores de nombres de la zona
+; Servidores de nombres
 @       IN  NS  ns.haven.local.
 @       IN  NS  ns2.haven.local.
 
-; Asociación de las IP con sus nombres
+; Registros PTR
 100     IN  PTR ns.haven.local.
 101     IN  PTR ns2.haven.local.
 ```
 
-### 4.5 Comprobación de sintaxis y recarga
+De esta manera, la dirección `192.168.6.100` corresponde a `ns.haven.local` y `192.168.6.101` corresponde a `ns2.haven.local`.
 
-Antes de aplicar los cambios, valida la configuración general y cada fichero de zona:
+### 4.5. Validación y recarga de BIND9
+
+Antes de aplicar los cambios, comprueba que la configuración y los archivos de zona no contienen errores:
 
 ```bash
 sudo named-checkconf
@@ -179,15 +194,17 @@ sudo named-checkzone 6.168.192.in-addr.arpa /etc/bind/zones/db.6.168.192
 sudo rndc reload
 ```
 
-Si las comprobaciones no muestran errores, el servicio puede cargar las zonas configuradas.
+Si las comprobaciones son correctas, el servidor podrá cargar las zonas configuradas.
 
 ---
 
-## 5. Alta del DNS secundario
+## 5. Configuración del servidor secundario
 
-### 5.1 Configuración de la dirección IP
+El servidor secundario utiliza la IP `192.168.6.101` y mantiene una copia de las zonas proporcionadas por el servidor primario.
 
-El equipo secundario debe utilizar `192.168.6.101/24`, sin repetir la IP del primario. En `/etc/network/interfaces`, configura la interfaz interna así:
+### 5.1. Configuración de la dirección IP
+
+Edita `/etc/network/interfaces` en el equipo secundario:
 
 ```text
 auto enp0s8
@@ -195,18 +212,18 @@ iface enp0s8 inet static
     address 192.168.6.101/24
 ```
 
-Reinicia la red y verifica la dirección asignada:
+Reinicia el servicio de red y verifica la dirección asignada:
 
 ```bash
 sudo systemctl restart networking
 ip -br addr
 ```
 
-La salida debe mostrar `192.168.6.101/24` en `enp0s8`.
+La interfaz `enp0s8` debe mostrar `192.168.6.101/24`.
 
-### 5.2 Opciones de BIND9
+### 5.2. Opciones generales del servicio
 
-En `/etc/bind/named.conf.options`, define las opciones para el nodo secundario:
+En `/etc/bind/named.conf.options`, configura las opciones del servidor secundario:
 
 ```conf
 acl "safeclients" {
@@ -235,9 +252,11 @@ options {
 };
 ```
 
-### 5.3 Definición de las zonas secundarias
+Esta configuración permite que BIND9 escuche en la dirección IP del servidor secundario y utilice los servidores externos indicados como reenviadores.
 
-Abre `/etc/bind/named.conf.local` y añade las declaraciones que indican al servicio de dónde obtener las zonas:
+### 5.3. Declaración de las zonas secundarias
+
+Edita `/etc/bind/named.conf.local`:
 
 ```conf
 zone "haven.local" {
@@ -253,74 +272,91 @@ zone "6.168.192.in-addr.arpa" {
 };
 ```
 
-Los ficheros de las zonas secundarias se almacenan en `/var/cache/bind/`, ya que BIND puede escribir en esa ubicación. No es necesario crearlos manualmente: el servicio los genera al completar la transferencia desde el primario.
+La directiva `masters` identifica el servidor del que se obtienen los datos originales.
 
-### 5.4 Validación y reinicio del servicio
+Los archivos de las zonas secundarias se almacenan en `/var/cache/bind/`, donde BIND9 puede guardar los datos recibidos mediante las transferencias. Estos archivos se generan automáticamente.
 
-Ejecuta los siguientes comandos en el secundario:
+### 5.4. Reinicio y comprobación del servicio
+
+Valida la configuración y reinicia el servicio DNS:
 
 ```bash
 sudo named-checkconf
 sudo systemctl restart named
-sudo systemctl status named
+sudo systemctl status named --no-pager
 ```
 
-Verifica que el servicio se encuentre activo y que no aparezcan errores en el arranque.
+Comprueba que el servicio se encuentre activo y que no aparezcan errores relacionados con las zonas.
 
 ---
 
-## 6. Pruebas de funcionamiento
+## 6. Verificación y resultados
 
-Realiza las comprobaciones desde el servidor secundario.
+Una vez configurados ambos equipos, se realizan diferentes pruebas para comprobar que las zonas se han transferido y que el servidor secundario responde correctamente.
 
-### 6.1 Puerto de escucha
+### 6.1. Comprobación del puerto 53
+
+En el servidor secundario, ejecuta:
 
 ```bash
 sudo ss -tulpn | grep ':53'
 ```
 
-BIND9 debe estar escuchando en la dirección `192.168.6.101` mediante TCP y UDP.
+BIND9 debe estar escuchando en `192.168.6.101` mediante TCP y UDP.
 
-### 6.2 Ficheros recibidos
+### 6.2. Comprobación de los archivos recibidos
+
+Ejecuta el siguiente comando en el servidor secundario:
 
 ```bash
 ls -l /var/cache/bind/
 ```
 
-Comprueba que estén presentes `db.haven.local` y `db.6.168.192`.
+Se deben encontrar los archivos correspondientes a las dos zonas:
 
-### 6.3 Comparación del registro SOA
+- `db.haven.local`
+- `db.6.168.192`
 
-Consulta el registro SOA de la zona en ambos servidores:
+### 6.3. Comparación de los registros SOA
+
+Para verificar que los servidores tienen la misma versión de la zona, realiza estas consultas:
 
 ```bash
 dig @192.168.6.100 haven.local SOA +short
 dig @192.168.6.101 haven.local SOA +short
 ```
 
-En la prueba realizada, ambos devolvieron el mismo resultado:
+El resultado obtenido durante las pruebas fue:
 
 ```text
 haven.local. hostmaster.haven.local. 3 43200 900 1814400 7200
 ```
 
-El número de serie observado fue `3` en los dos equipos.
+Ambos servidores devolvieron el mismo número de serie: `3`.
 
-### 6.4 Consulta inversa
+### 6.4. Prueba de resolución inversa
+
+Para comprobar la resolución inversa de la dirección del servidor secundario:
 
 ```bash
 dig @192.168.6.101 -x 192.168.6.101 +short
 ```
 
-La respuesta obtenida fue `ns2.haven.local.`.
+La respuesta obtenida fue:
 
-### 6.5 Revisión de los registros del servicio
+```text
+ns2.haven.local.
+```
+
+### 6.5. Revisión de los registros del servicio
+
+Para consultar los últimos mensajes de BIND9, utiliza:
 
 ```bash
 sudo journalctl -u named -n 20 --no-pager
 ```
 
-En el registro aparecieron mensajes que indicaban que las dos zonas se habían transferido correctamente:
+Durante las comprobaciones se encontraron mensajes similares a los siguientes:
 
 ```text
 zone haven.local/IN: transferred serial 3
@@ -329,43 +365,48 @@ transfer of 'haven.local/IN' from 192.168.6.100#53: Transfer status: success
 transfer of '6.168.192.in-addr.arpa/IN' from 192.168.6.100#53: Transfer status: success
 ```
 
-Estos resultados indican que el secundario recibió las zonas desde `192.168.6.100`.
+Estos mensajes indican que las transferencias de ambas zonas finalizaron correctamente.
 
 ---
 
-## 7. Incidencias durante la configuración
+## 7. Problemas encontrados y soluciones
 
-| Incidencia | Motivo detectado | Medida aplicada |
+Durante el proceso de configuración aparecieron varias incidencias que fue necesario corregir.
+
+| Problema | Causa | Solución aplicada |
 |---|---|---|
-| Error `connection refused` durante la transferencia y ausencia de escucha en el puerto 53 | El secundario conservaba la IP `192.168.6.100`, mientras que BIND intentaba escuchar en `192.168.6.101` | Asignar `192.168.6.101/24` a `enp0s8` en el secundario |
-| Error `file format mismatch (not raw)` y fallo al cargar la zona desde el maestro | La ruta de almacenamiento apuntaba a `/etc/bind/zones/`, donde el servicio no podía escribir los ficheros secundarios | Cambiar la ubicación de las zonas secundarias a `/var/cache/bind/` |
-| Declaración NS incompleta en la zona inversa | Se había escrito `@ IN NS ns.`, sin el nombre de dominio completo | Sustituirlo por `@ IN NS ns.haven.local.` |
-| El primario no tenía bien definido el secundario | Faltaban los registros `NS` y `A` para `ns2`, y el serial no se había actualizado | Añadir los registros `NS`, `A` y `PTR` de `ns2` e incrementar el serial hasta `3` |
+| Error `connection refused` durante las transferencias | El servidor secundario tenía configurada la IP `192.168.6.100`, mientras BIND9 intentaba escuchar en `192.168.6.101` | Asignar `192.168.6.101/24` a la interfaz `enp0s8` del secundario |
+| Error `file format mismatch (not raw)` al cargar una zona | La ruta de almacenamiento apuntaba a `/etc/bind/zones/`, donde BIND9 no podía escribir los archivos secundarios | Cambiar la ruta de almacenamiento a `/var/cache/bind/` |
+| Registro NS incorrecto en la zona inversa | Se había utilizado `@ IN NS ns.` en lugar del nombre completo | Sustituirlo por `@ IN NS ns.haven.local.` |
+| El servidor primario no identificaba correctamente al secundario | Faltaban los registros `NS` y `A` de `ns2`, y el número de serie no se había actualizado | Añadir los registros `NS`, `A` y `PTR` correspondientes e incrementar el serial hasta `3` |
 
 ---
 
-## 8. Herramientas de comprobación
+## 8. Comandos útiles
 
-Estos comandos resultan útiles para revisar la configuración y diagnosticar posibles fallos:
+Los siguientes comandos permiten comprobar la configuración, consultar los registros del servicio y diagnosticar posibles errores.
 
-| Comando | Uso |
+| Comando | Utilidad |
 |---|---|
-| `sudo named-checkconf` | Detecta errores de sintaxis en la configuración de BIND9 |
-| `sudo named-checkzone <zona> <fichero>` | Valida el contenido de una zona |
-| `sudo rndc reload` | Solicita al primario que vuelva a cargar su configuración |
+| `sudo named-checkconf` | Comprueba la sintaxis de la configuración de BIND9 |
+| `sudo named-checkzone <zona> <fichero>` | Valida un archivo de zona |
+| `sudo rndc reload` | Recarga la configuración del servidor |
 | `sudo rndc retransfer haven.local` | Fuerza una nueva transferencia de la zona en el secundario |
-| `sudo journalctl -u named -n 30 --no-pager` | Muestra las últimas entradas del registro del servicio |
+| `sudo journalctl -u named -n 30 --no-pager` | Muestra los últimos mensajes del servicio |
 | `sudo ss -tulpn \| grep ':53'` | Comprueba qué proceso escucha en el puerto DNS |
-| `dig @<ip> <zona> AXFR` | Intenta consultar la transferencia completa de una zona |
+| `dig @<ip> <zona> AXFR` | Permite probar una transferencia completa de zona |
 
 ---
 
-## 9. Fuentes consultadas
+## 9. Referencias
 
 - [Configuración de un servidor DNS esclavo con BIND9 — Javier CD](https://www.javiercd.es/posts/servicios/dns/bind9/dns_esclavo/dns_esclavo/)
 - [Documentación oficial de BIND 9](https://bind9.readthedocs.io/)
-"""
 
-out = Path("/mnt/data/Practica_DNS_BIND9_reescrita.md")
-out.write_text(reworked, encoding="utf-8")
-print(f"Archivo creado: {out}\nTamaño: {out.stat().st_size} bytes")
+---
+
+## 10. Conclusión
+
+En esta práctica se ha preparado una infraestructura DNS con un servidor primario y otro secundario mediante BIND9 sobre Debian. Se han definido las zonas directa e inversa, configurado las transferencias entre los equipos y realizado consultas para verificar la sincronización.
+
+Las pruebas documentadas muestran que el servidor secundario recibió las zonas y respondió a las consultas DNS. También se identificaron y corrigieron problemas relacionados con las direcciones IP, los permisos de almacenamiento y los registros DNS.
