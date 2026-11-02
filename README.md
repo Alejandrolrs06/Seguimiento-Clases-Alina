@@ -199,6 +199,10 @@ Porque el serial actúa como número de versión. Si no se incrementa, los servi
 
 El recursivo hace todas las consultas necesarias hasta obtener la respuesta final (ej. 8.8.8.8). El iterativo responde con lo que sabe o da una referencia a otro servidor más adecuado (raíz, TLD, autoritativos).
 
+
+<br>
+<br>
+
 **28-09 DNS**
 
 
